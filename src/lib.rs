@@ -72,8 +72,7 @@ impl From<lopdf::Error> for OutputError {
 }
 
 macro_rules! dlog {
-    ($($e:expr),*) => { {$(let _ = $e;)*} }
-    //($($t:tt)*) => { println!($($t)*) }
+    ($($t:tt)*) => { log::debug!($($t)*) }
 }
 
 fn get_info(doc: &Document) -> Option<&Dictionary> {
@@ -359,7 +358,7 @@ fn encoding_to_unicode_table(name: &[u8]) -> Vec<u16> {
         _ => panic!("unexpected encoding {:?}", pdf_to_utf8(name))
     };
     let encoding_table = encoding.iter()
-        .map(|x| if let &Some(x) = x { glyphnames::name_to_unicode(x).unwrap() } else { 0 })
+        .map(|x| if let &Some(x) = x { glyphnames::name_to_unicode(x).unwrap_or(0) } else { 0 })
         .collect();
     encoding_table
 }
@@ -537,7 +536,7 @@ impl<'a> PdfSimpleFont<'a> {
                 }
                 // "Type" is optional
                 let name = encoding.get(b"Type").and_then(|x| x.as_name()).and_then(|x| Ok(pdf_to_utf8(x)));
-                dlog!("name: {}", name);
+                dlog!("name: {:?}", name);
 
                 encoding_table = Some(table);
             }
@@ -556,7 +555,7 @@ impl<'a> PdfSimpleFont<'a> {
                     encoding_table = Some(table)
                 } else if subtype == "TrueType" {
                     encoding_table = Some(encodings::WIN_ANSI_ENCODING.iter()
-                        .map(|x| if let &Some(x) = x { glyphnames::name_to_unicode(x).unwrap() } else { 0 })
+                        .map(|x| if let &Some(x) = x { glyphnames::name_to_unicode(x).unwrap_or(0) } else { 0 })
                         .collect());
                 }
             }
@@ -609,10 +608,13 @@ impl<'a> PdfSimpleFont<'a> {
                     if let Some(ref encoding) = encoding_table {
                         dlog!("has encoding");
                         for w in font_metrics.2 {
-                            let c = glyphnames::name_to_unicode(w.2).unwrap();
-                            for i in 0..encoding.len() {
-                                if encoding[i] == c {
-                                    width_map.insert(i as CharCode, w.1 as f64);
+                            let c_opt = glyphnames::name_to_unicode(w.2)
+                                .or_else(|| zapfglyphnames::zapfdigbats_names_to_unicode(w.2));
+                            if let Some(c) = c_opt {
+                                for i in 0..encoding.len() {
+                                    if encoding[i] == c {
+                                        width_map.insert(i as CharCode, w.1 as f64);
+                                    }
                                 }
                             }
                         }
@@ -629,7 +631,7 @@ impl<'a> PdfSimpleFont<'a> {
                                 table[w.0 as usize] = if base_name == "ZapfDingbats" {
                                     zapfglyphnames::zapfdigbats_names_to_unicode(w.2).unwrap_or_else(|| panic!("bad name {:?}", w))
                                 } else {
-                                    glyphnames::name_to_unicode(w.2).unwrap()
+                                    glyphnames::name_to_unicode(w.2).unwrap_or(0)
                                 }
                             }
                         }
