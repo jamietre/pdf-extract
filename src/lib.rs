@@ -1939,44 +1939,78 @@ impl<'a> Processor<'a> {
                     apply_state(doc, &mut gs, state);
                 }
                 "i" => { dlog!("unhandled graphics state flattness operator {:?}", operation); }
-                "w" => { gs.line_width = as_num(&operation.operands[0]); }
+                "w" => {
+                    if operation.operands.len() >= 1 {
+                        gs.line_width = as_num(&operation.operands[0]);
+                    } else {
+                        warn!("malformed 'w' operator: expected 1 operand, got 0");
+                    }
+                }
                 "J" | "j" | "M" | "d" | "ri"  => { dlog!("unknown graphics state operator {:?}", operation); }
-                "m" => { path.ops.push(PathOp::MoveTo(as_num(&operation.operands[0]), as_num(&operation.operands[1]))) }
-                "l" => { path.ops.push(PathOp::LineTo(as_num(&operation.operands[0]), as_num(&operation.operands[1]))) }
+                "m" => {
+                    if operation.operands.len() >= 2 {
+                        path.ops.push(PathOp::MoveTo(as_num(&operation.operands[0]), as_num(&operation.operands[1])))
+                    } else {
+                        warn!("malformed 'm' operator: expected 2 operands, got {}", operation.operands.len());
+                    }
+                }
+                "l" => {
+                    if operation.operands.len() >= 2 {
+                        path.ops.push(PathOp::LineTo(as_num(&operation.operands[0]), as_num(&operation.operands[1])))
+                    } else {
+                        warn!("malformed 'l' operator: expected 2 operands, got {}", operation.operands.len());
+                    }
+                }
                 "c" => {
-                    path.ops.push(PathOp::CurveTo(
-                        as_num(&operation.operands[0]),
-                        as_num(&operation.operands[1]),
-                        as_num(&operation.operands[2]),
-                        as_num(&operation.operands[3]),
-                        as_num(&operation.operands[4]),
-                        as_num(&operation.operands[5])))
+                    if operation.operands.len() >= 6 {
+                        path.ops.push(PathOp::CurveTo(
+                            as_num(&operation.operands[0]),
+                            as_num(&operation.operands[1]),
+                            as_num(&operation.operands[2]),
+                            as_num(&operation.operands[3]),
+                            as_num(&operation.operands[4]),
+                            as_num(&operation.operands[5])))
+                    } else {
+                        warn!("malformed 'c' operator: expected 6 operands, got {}", operation.operands.len());
+                    }
                 }
                 "v" => {
-                    let (x, y) = path.current_point();
-                    path.ops.push(PathOp::CurveTo(
-                        x,
-                        y,
-                        as_num(&operation.operands[0]),
-                        as_num(&operation.operands[1]),
-                        as_num(&operation.operands[2]),
-                        as_num(&operation.operands[3])))
+                    if operation.operands.len() >= 4 {
+                        let (x, y) = path.current_point();
+                        path.ops.push(PathOp::CurveTo(
+                            x,
+                            y,
+                            as_num(&operation.operands[0]),
+                            as_num(&operation.operands[1]),
+                            as_num(&operation.operands[2]),
+                            as_num(&operation.operands[3])))
+                    } else {
+                        warn!("malformed 'v' operator: expected 4 operands, got {}", operation.operands.len());
+                    }
                 }
                 "y" => {
-                    path.ops.push(PathOp::CurveTo(
-                        as_num(&operation.operands[0]),
-                        as_num(&operation.operands[1]),
-                        as_num(&operation.operands[2]),
-                        as_num(&operation.operands[3]),
-                        as_num(&operation.operands[2]),
-                        as_num(&operation.operands[3])))
+                    if operation.operands.len() >= 4 {
+                        path.ops.push(PathOp::CurveTo(
+                            as_num(&operation.operands[0]),
+                            as_num(&operation.operands[1]),
+                            as_num(&operation.operands[2]),
+                            as_num(&operation.operands[3]),
+                            as_num(&operation.operands[2]),
+                            as_num(&operation.operands[3])))
+                    } else {
+                        warn!("malformed 'y' operator: expected 4 operands, got {}", operation.operands.len());
+                    }
                 }
                 "h" => { path.ops.push(PathOp::Close) }
                 "re" => {
-                    path.ops.push(PathOp::Rect(as_num(&operation.operands[0]),
-                                               as_num(&operation.operands[1]),
-                                               as_num(&operation.operands[2]),
-                                               as_num(&operation.operands[3])))
+                    if operation.operands.len() >= 4 {
+                        path.ops.push(PathOp::Rect(as_num(&operation.operands[0]),
+                                                   as_num(&operation.operands[1]),
+                                                   as_num(&operation.operands[2]),
+                                                   as_num(&operation.operands[3])))
+                    } else {
+                        warn!("malformed 're' operator: expected 4 operands, got {}", operation.operands.len());
+                    }
                 }
                 "s" | "f*" | "B" | "B*" | "b" => {
                     dlog!("unhandled path op {:?}", operation);
