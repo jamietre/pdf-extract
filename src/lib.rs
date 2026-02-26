@@ -394,9 +394,10 @@ impl<'a> PdfSimpleFont<'a> {
                     Some(&Object::Stream(ref s)) => {
                         let s = get_contents(s);
                         //dlog!("font contents {:?}", pdf_to_utf8(&s));
-                        match type1_encoding_parser::get_encoding_map(&s) {
-                            Ok(enc) => type1_encoding = Some(enc),
-                            Err(e) => warn!("failed to parse Type1 font encoding: {:?}", e),
+                        match std::panic::catch_unwind(|| type1_encoding_parser::get_encoding_map(&s)) {
+                            Ok(Ok(enc)) => type1_encoding = Some(enc),
+                            Ok(Err(e)) => warn!("failed to parse Type1 font encoding: {:?}", e),
+                            Err(_) => warn!("failed to parse Type1 font encoding: parser panicked on malformed data"),
                         }
                     }
                     _ => { dlog!("font file {:?}", file) }
