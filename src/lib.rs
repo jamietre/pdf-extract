@@ -1487,11 +1487,12 @@ impl Path {
         Path { ops: Vec::new() }
     }
     fn current_point(&self) -> (f64, f64) {
-        match self.ops.last().unwrap() {
-            &PathOp::MoveTo(x, y) => { (x, y) }
-            &PathOp::LineTo(x, y) => { (x, y) }
-            &PathOp::CurveTo(_, _, _, _, x, y) => { (x, y) }
-            _ => { panic!() }
+        match self.ops.last() {
+            None => (0., 0.),
+            Some(&PathOp::MoveTo(x, y)) => (x, y),
+            Some(&PathOp::LineTo(x, y)) => (x, y),
+            Some(&PathOp::CurveTo(_, _, _, _, x, y)) => (x, y),
+            Some(_) => (0., 0.),
         }
     }
 }
