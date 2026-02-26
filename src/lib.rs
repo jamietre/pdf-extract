@@ -594,7 +594,9 @@ impl<'a> PdfSimpleFont<'a> {
                 width_map.insert((first_char + i) as CharCode, w);
                 i += 1;
             }
-            assert_eq!(first_char + i - 1, last_char);
+            if first_char + i - 1 != last_char {
+                warn!("font widths array length mismatch: expected {} entries (first_char={} last_char={}), got {}", last_char - first_char + 1, first_char, last_char, i);
+            }
         } else {
             let name = if is_core_font(&base_name) {
                 &base_name
