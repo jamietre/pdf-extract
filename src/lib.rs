@@ -392,15 +392,43 @@ impl<'a> PdfSimpleFont<'a> {
                 let file = maybe_get_obj(doc, descriptor, b"FontFile");
                 match file {
                     Some(&Object::Stream(ref s)) => {
-                        let unwind_safe_stream = std::panic::AssertUnwindSafe(s);
-                        match std::panic::catch_unwind(move || {
-                            let bytes = get_contents(*unwind_safe_stream);
-                            //dlog!("font contents {:?}", pdf_to_utf8(&bytes));
-                            type1_encoding_parser::get_encoding_map(&bytes)
-                        }) {
-                            Ok(Ok(enc)) => type1_encoding = Some(enc),
-                            Ok(Err(e)) => warn!("failed to parse Type1 font encoding: {:?}", e),
-                            Err(_) => warn!("failed to parse Type1 font encoding: parser panicked on malformed data"),
+                        let bytes = get_contents(s);
+                        match type1_encoding_parser::parse(&bytes) {
+                            Ok(lexed) => {
+                                // Inline get_encoding_map logic but without the .expect() panic
+                                let mut map = std::collections::HashMap::new();
+                                let mut i = 0;
+                                'outer: while i < lexed.len() {
+                                    if let type1_encoding_parser::Value::Operator(ref o) = lexed[i] {
+                                        if o == "array" {
+                                            let count = if let type1_encoding_parser::Value::Integer(ref c) = lexed[i-1] { *c } else { i += 1; continue; };
+                                            let _ = count;
+                                            let name = if let type1_encoding_parser::Value::Name(ref n) = lexed[i-2] { n } else { i += 1; continue; };
+                                            i += 1;
+                                            if name == b"Encoding" {
+                                                while i < lexed.len() {
+                                                    if let type1_encoding_parser::Value::Operator(ref o) = lexed[i] {
+                                                        if o == "put" {
+                                                            if let (type1_encoding_parser::Value::Name(ref n), type1_encoding_parser::Value::Integer(ref c)) = (&lexed[i-1], &lexed[i-2]) {
+                                                                map.insert(*c as u32, n.clone());
+                                                            }
+                                                        } else if o == "def" {
+                                                            continue 'outer;
+                                                        }
+                                                    }
+                                                    i += 1;
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                    i += 1;
+                                }
+                                if !map.is_empty() {
+                                    type1_encoding = Some(map);
+                                }
+                            }
+                            Err(e) => warn!("failed to parse Type1 font encoding: {:?}", e),
                         }
                     }
                     _ => { dlog!("font file {:?}", file) }
