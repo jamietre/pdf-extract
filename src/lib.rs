@@ -198,9 +198,9 @@ impl<'a, T: FromObj<'a>> FromOptObj<'a> for Option<T> {
     }
 }
 
-impl<'a, T: FromObj<'a>> FromOptObj<'a> for T {
-    fn from_opt_obj(doc: &'a Document, obj: Option<&'a Object>, key: &[u8]) -> Self {
-        T::from_obj(doc, obj.expect(&String::from_utf8_lossy(key))).expect("wrong type")
+impl<'a, T: FromObj<'a> + Default> FromOptObj<'a> for T {
+    fn from_opt_obj(doc: &'a Document, obj: Option<&'a Object>, _key: &[u8]) -> Self {
+        obj.and_then(|o| T::from_obj(doc, o)).unwrap_or_default()
     }
 }
 
@@ -209,30 +209,30 @@ impl<'a, T: FromObj<'a>> FromOptObj<'a> for T {
 impl<'a, T: FromObj<'a>> FromObj<'a> for Vec<T> {
     fn from_obj(doc: &'a Document, obj: &'a Object) -> Option<Self> {
         maybe_deref(doc, obj).as_array().map(|x| x.iter()
-            .map(|x| T::from_obj(doc, x).expect("wrong type"))
+            .filter_map(|x| T::from_obj(doc, x))
             .collect()).ok()
     }
 }
 
-// XXX: These will panic if we don't have the right number of items
-// we don't want to do that
 impl<'a, T: FromObj<'a>> FromObj<'a> for [T; 4] {
     fn from_obj(doc: &'a Document, obj: &'a Object) -> Option<Self> {
-        maybe_deref(doc, obj).as_array().map(|x| {
-            let mut all = x.iter()
-                .map(|x| T::from_obj(doc, x).expect("wrong type"));
-            [all.next().unwrap(), all.next().unwrap(), all.next().unwrap(), all.next().unwrap()]
-        }).ok()
+        let arr = maybe_deref(doc, obj).as_array().ok()?;
+        let all: Option<Vec<T>> = arr.iter().map(|x| T::from_obj(doc, x)).collect();
+        let all = all?;
+        if all.len() < 4 { return None; }
+        let mut iter = all.into_iter();
+        Some([iter.next()?, iter.next()?, iter.next()?, iter.next()?])
     }
 }
 
 impl<'a, T: FromObj<'a>> FromObj<'a> for [T; 3] {
     fn from_obj(doc: &'a Document, obj: &'a Object) -> Option<Self> {
-        maybe_deref(doc, obj).as_array().map(|x| {
-            let mut all = x.iter()
-                .map(|x| T::from_obj(doc, x).expect("wrong type"));
-            [all.next().unwrap(), all.next().unwrap(), all.next().unwrap()]
-        }).ok()
+        let arr = maybe_deref(doc, obj).as_array().ok()?;
+        let all: Option<Vec<T>> = arr.iter().map(|x| T::from_obj(doc, x)).collect();
+        let all = all?;
+        if all.len() < 3 { return None; }
+        let mut iter = all.into_iter();
+        Some([iter.next()?, iter.next()?, iter.next()?])
     }
 }
 
@@ -1598,7 +1598,7 @@ fn make_colorspace<'a>(doc: &'a Document, name: &[u8], resources: &'a Dictionary
 /// Attempts to construct a named colorspace from the PDF resources dictionary.
 /// Returns None (with a warning) on any parse failure so callers can fall back gracefully.
 fn try_make_colorspace<'a>(doc: &'a Document, name: &[u8], resources: &'a Dictionary) -> Option<ColorSpace> {
-    let colorspaces: &Dictionary = get(&doc, resources, b"ColorSpace");
+    let colorspaces: &Dictionary = maybe_get(&doc, resources, b"ColorSpace")?;
     let cs = maybe_get_obj(doc, colorspaces, &name[..])?;
 
     if let Ok(cs) = cs.as_array() {
@@ -1872,12 +1872,19 @@ impl<'a> Processor<'a> {
                     gs.ts.leading = as_num(&operation.operands[0]);
                 }
                 "Tf" => {
-                    let fonts: &Dictionary = get(&doc, resources, b"Font");
+                    let fonts: &Dictionary = match maybe_get(&doc, resources, b"Font") {
+                        Some(d) => d,
+                        None => { warn!("Tf: Font resources not found or wrong type"); continue; }
+                    };
                     let name = match operation.operands.first().and_then(|o| o.as_name().ok()) {
                         Some(n) => n,
                         None => { warn!("invalid operand for Tf operator"); continue; }
                     };
-                    let font = font_table.entry(name.to_owned()).or_insert_with(|| make_font(doc, get::<&Dictionary>(doc, fonts, name))).clone();
+                    let font_dict: &Dictionary = match maybe_get::<&Dictionary>(doc, fonts, name) {
+                        Some(d) => d,
+                        None => { warn!("Tf: font {:?} not found or wrong type", String::from_utf8_lossy(name)); continue; }
+                    };
+                    let font = font_table.entry(name.to_owned()).or_insert_with(|| make_font(doc, font_dict)).clone();
                     {
                         /*let file = font.get_descriptor().and_then(|desc| desc.get_file());
                     if let Some(file) = file {
@@ -1958,12 +1965,20 @@ impl<'a> Processor<'a> {
                     }
                 }
                 "gs" => {
-                    let ext_gstate: &Dictionary = get(doc, resources, b"ExtGState");
+                    let ext_gstate: Option<&Dictionary> = maybe_get(doc, resources, b"ExtGState");
+                    let ext_gstate = match ext_gstate {
+                        Some(d) => d,
+                        None => { warn!("gs: ExtGState not found or wrong type"); continue; }
+                    };
                     let name = match operation.operands.first().and_then(|o| o.as_name().ok()) {
                         Some(n) => n,
                         None => { warn!("invalid operand for gs operator"); continue; }
                     };
-                    let state: &Dictionary = get(doc, ext_gstate, name);
+                    let state: Option<&Dictionary> = maybe_get(doc, ext_gstate, name);
+                    let state = match state {
+                        Some(d) => d,
+                        None => { warn!("gs: state {:?} not found or wrong type", String::from_utf8_lossy(name)); continue; }
+                    };
                     apply_state(doc, &mut gs, state);
                 }
                 "i" => { dlog!("unhandled graphics state flattness operator {:?}", operation); }
@@ -2065,12 +2080,18 @@ impl<'a> Processor<'a> {
                 "Do" => {
                     // `Do` process an entire subdocument, so we do a recursive call to `process_stream`
                     // with the subdocument content and resources
-                    let xobject: &Dictionary = get(&doc, resources, b"XObject");
+                    let xobject: &Dictionary = match maybe_get(&doc, resources, b"XObject") {
+                        Some(d) => d,
+                        None => { warn!("Do: XObject resources not found or wrong type"); continue; }
+                    };
                     let name = match operation.operands.first().and_then(|o| o.as_name().ok()) {
                         Some(n) => n,
                         None => { warn!("invalid operand for Do operator"); continue; }
                     };
-                    let xf: &Stream = get(&doc, xobject, name);
+                    let xf: &Stream = match maybe_get(&doc, xobject, name) {
+                        Some(s) => s,
+                        None => { warn!("Do: XObject {:?} not found or wrong type", String::from_utf8_lossy(name)); continue; }
+                    };
                     let resources = maybe_get_obj(&doc, &xf.dict, b"Resources").and_then(|n| n.as_dict().ok()).unwrap_or(resources);
                     let contents = get_contents(xf);
                     self.process_stream(&doc, contents, resources, &media_box, output, page_num)?;
