@@ -812,7 +812,9 @@ impl<'a> PdfType3Font<'a> {
             width_map.insert((first_char + i) as CharCode, w);
             i += 1;
         }
-        assert_eq!(first_char + i - 1, last_char);
+        if first_char + i - 1 != last_char {
+            warn!("Type3 font widths array length mismatch: expected {} entries (first_char={} last_char={}), got {}", last_char - first_char + 1, first_char, last_char, i);
+        }
         PdfType3Font {doc, font, widths: width_map, encoding: encoding_table, unicode_map}
     }
 }
