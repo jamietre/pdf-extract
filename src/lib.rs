@@ -1724,12 +1724,13 @@ fn try_make_colorspace<'a>(doc: &'a Document, name: &[u8], resources: &'a Dictio
 }
 
 struct Processor<'a> {
-    _none: PhantomData<&'a ()>
+    font_table: HashMap<Vec<u8>, Rc<dyn PdfFont + 'a>>,
+    _none: PhantomData<&'a ()>,
 }
 
 impl<'a> Processor<'a> {
     fn new() -> Processor<'a> {
-        Processor { _none: PhantomData }
+        Processor { font_table: HashMap::new(), _none: PhantomData }
     }
 
     fn process_stream(&mut self, doc: &'a Document, content: Vec<u8>, resources: &'a Dictionary, media_box: &MediaBox, output: &mut dyn OutputDev, page_num: u32) -> Result<(), OutputError> {
@@ -1740,7 +1741,6 @@ impl<'a> Processor<'a> {
                 return Ok(());
             }
         };
-        let mut font_table = HashMap::new();
         let mut gs: GraphicsState = GraphicsState {
             ts: TextState {
                 font: None,
@@ -1886,7 +1886,7 @@ impl<'a> Processor<'a> {
                         Some(d) => d,
                         None => { warn!("Tf: font {:?} not found or wrong type", String::from_utf8_lossy(name)); continue; }
                     };
-                    let font = font_table.entry(name.to_owned()).or_insert_with(|| make_font(doc, font_dict)).clone();
+                    let font = self.font_table.entry(name.to_owned()).or_insert_with(|| make_font(doc, font_dict)).clone();
                     {
                         /*let file = font.get_descriptor().and_then(|desc| desc.get_file());
                     if let Some(file) = file {
@@ -2632,6 +2632,11 @@ pub fn output_doc_page(doc: &Document, output: &mut dyn OutputDev, page_num: u32
 fn output_doc_inner<'a>(page_num: u32, object_id: ObjectId, doc: &'a Document, p: & mut Processor<'a>, output: &mut dyn OutputDev, empty_resources: &'a Dictionary) -> Result<(), OutputError> {
     let page_dict = doc.get_object(object_id).unwrap().as_dict().unwrap();
     dlog!("page {} {:?}", page_num, page_dict);
+    // Font resource names (e.g. /F0) are only unique within a page's resource
+    // dictionary; the same name can map to a different font on the next page.
+    // Reset the font cache per page so a stale entry from an earlier page isn't
+    // reused, which would decode text with the wrong font's ToUnicode CMap.
+    p.font_table.clear();
     // XXX: Some pdfs lack a Resources directory
     let resources = get_inherited(doc, page_dict, b"Resources").unwrap_or(empty_resources);
     dlog!("resources {:?}", resources);
