@@ -401,6 +401,7 @@ impl<'a> PdfSimpleFont<'a> {
                                 'outer: while i < lexed.len() {
                                     if let type1_encoding_parser::Value::Operator(ref o) = lexed[i] {
                                         if o == "array" {
+                                            if i < 2 { i += 1; continue; }
                                             let count = if let type1_encoding_parser::Value::Integer(ref c) = lexed[i-1] { *c } else { i += 1; continue; };
                                             let _ = count;
                                             let name = if let type1_encoding_parser::Value::Name(ref n) = lexed[i-2] { n } else { i += 1; continue; };
@@ -409,6 +410,7 @@ impl<'a> PdfSimpleFont<'a> {
                                                 while i < lexed.len() {
                                                     if let type1_encoding_parser::Value::Operator(ref o) = lexed[i] {
                                                         if o == "put" {
+                                                            if i < 2 { i += 1; continue; }
                                                             if let (type1_encoding_parser::Value::Name(ref n), type1_encoding_parser::Value::Integer(ref c)) = (&lexed[i-1], &lexed[i-2]) {
                                                                 map.insert(*c as u32, n.clone());
                                                             }
@@ -996,7 +998,10 @@ fn get_unicode_map<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<HashMa
             let contents = get_contents(stream);
             dlog!("Stream: {}", String::from_utf8_lossy(&contents));
 
-            match adobe_cmap_parser::get_unicode_map(&contents) {
+            // adobe_cmap_parser panics (expect) on unparseable input
+            let parsed = std::panic::catch_unwind(|| adobe_cmap_parser::get_unicode_map(&contents))
+                .unwrap_or(Err("adobe_cmap_parser panicked"));
+            match parsed {
                 Ok(cmap) => {
                     let mut unicode = HashMap::new();
                     // "It must use the beginbfchar, endbfchar, beginbfrange, and endbfrange operators to
@@ -1005,7 +1010,10 @@ fn get_unicode_map<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<HashMa
                     for (&k, v) in cmap.iter() {
                         let mut be: Vec<u16> = Vec::new();
                         let mut i = 0;
-                        assert!(v.len() % 2 == 0);
+                        if v.len() % 2 != 0 {
+                            warn!("ToUnicode entry for code {} has odd byte length, skipping", k);
+                            continue;
+                        }
                         while i < v.len() {
                             be.push(((v[i] as u16) << 8) | v[i+1] as u16);
                             i += 2;
